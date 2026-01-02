@@ -1,0 +1,23 @@
+# Sim2Real Configuration
+
+# Control Loop
+num_steps: 30  # Number of inference steps to execute
+step_delay_ms: 100  # Delay between steps (ms)
+
+# Model
+model_path: "c:/junkyard/ai/autobots/autobot10/models/v10/board_view_v10_final_20251225_164911"
+
+# Hardware
+robot_port: "COM5"
+camera_index: 0
+camera_width: 640
+camera_height: 480
+
+# Output
+save_images: true
+save_trajectory: true
+output_dir: "outputs"
+
+# Safety
+max_joint_change_deg: 30  # Maximum joint change per step (degrees)
+enable_safety_checks: true
