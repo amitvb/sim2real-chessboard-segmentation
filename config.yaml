@@ -4,8 +4,10 @@
 num_steps: 30  # Number of inference steps to execute
 step_delay_ms: 100  # Delay between steps (ms)
 
-# Model
-model_path: "c:/junkyard/ai/autobots/autobot10/models/v10/board_view_v10_final_20251225_164911"
+# Model Paths (use --model to override)
+# V10 model (10D observations): ../autobot10/models/v10/board_view_v10_final_*.zip
+# V10-segmented model (20D with vision): ../autobot10-segmented/models/v10-segmented/board_view_v10_final_*.zip
+model_path: null  # Set via command line --model argument
 
 # Hardware
 robot_port: "COM5"

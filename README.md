@@ -1,10 +1,12 @@
 # Sim2Real Chessboard Segmentation
 
-Physical robot control using autobot10's trained chessboard viewing model.
+Physical robot deployment system for trained RL models on DofBot SE arm.
 
 ## Overview
 
-This project deploys the autobot10 trained model (v10) to control the physical DofBot arm to find and view a chessboard in the real world.
+This project deploys trained models from autobot10 and autobot10-segmented to control the physical DofBot arm. Supports both:
+- **V10**: Basic model with 10D observations (joint positions + velocities)
+- **V10-Segmented**: Vision-guided model with 20D observations (joints + segmentation features)
 
 ## Architecture
 
@@ -16,11 +18,14 @@ This project deploys the autobot10 trained model (v10) to control the physical D
 
 ## Components
 
-- `autobot10_inference.py` - Thin wrapper that imports V10 inference from autobot10 project
 - `run_sim2real.py` - Main control loop for physical robot deployment
-- `config.yaml` - Configuration (step count, model path, etc.)
+- `autobot10_inference.py` - Wrapper for V10 model inference
+- `autobot10_segmented_inference.py` - Wrapper for V10-Segmented model with vision
+- `sim2real_visualizer.py` - Real-time 3D visualization of arm movements
+- `verify_pose.py` - Pose verification and testing utility
+- `config.yaml` - Configuration (step count, hardware settings)
 
-**Note:** All V10 inference logic resides in `autobot10/inference.py` for self-containment.
+**Note:** Model inference logic resides in respective training projects for self-containment.
 
 ## Setup
 
@@ -34,22 +39,34 @@ pip install -r requirements.txt
 
 ## Usage
 
+### Basic V10 Model
 ```bash
-python run_sim2real.py
+python run_sim2real.py --model ../autobot10/models/v10/board_view_v10_final_*.zip
 ```
 
-This will:
+### V10-Segmented Model (Vision-Guided)
+```bash
+python run_sim2real.py --use-segmented --model ../autobot10-segmented/models/v10-segmented/board_view_v10_final_*.zip
+```
+
+### With Visualization
+```bash
+python run_sim2real.py --model <path> --visualize
+```
+
+The system will:
 1. Initialize physical robot and camera
-2. Load autobot10 trained model
-3. Run model inference for 30 steps
+2. Load specified trained model
+3. Run model inference for specified steps (default: 30)
 4. Apply predicted actions to physical arm
-5. Save results and captured images
+5. Save trajectory data and captured images to `outputs/`
 
 ## Requirements
 
-- Physical DofBot SE arm connected (COM5)
-- USB camera on index 0
-- Trained autobot10 model at: `c:/junkyard/ai/autobots/autobot10/models/v10/board_view_v10_final_20251225_164911.zip`
+- Physical DofBot SE arm connected via USB (default COM5)
+- USB camera (default index 0)
+- Trained model from autobot10 or autobot10-segmented
+- For V10-segmented: YOLOv8-seg model at `../chess-model-evaluation/models/YOLO-amit-seg/`
 
 ## Safety
 

@@ -19,8 +19,14 @@ This validates the inference API without requiring the physical robot.
 - Keep emergency stop accessible
 - Monitor first run carefully
 
+**V10 Model (Basic):**
 ```bash
-python run_sim2real.py
+python run_sim2real.py --model ../autobot10/models/v10/board_view_v10_final_*.zip
+```
+
+**V10-Segmented Model (Vision-Guided):**
+```bash
+python run_sim2real.py --use-segmented --model ../autobot10-segmented/models/v10-segmented/board_view_v10_final_*.zip
 ```
 
 Default: 30 steps, saves images and trajectory to `outputs/`
@@ -29,13 +35,16 @@ Default: 30 steps, saves images and trajectory to `outputs/`
 
 ```bash
 # Run with custom step count
-python run_sim2real.py --steps 50
+python run_sim2real.py --model <path> --steps 50
 
-# Use different model
-python run_sim2real.py --model path/to/model.zip
+# Enable visualization
+python run_sim2real.py --model <path> --visualize
 
 # Don't save images (faster)
-python run_sim2real.py --no-save
+python run_sim2real.py --model <path> --no-save
+
+# Custom servo speed
+python run_sim2real.py --model <path> --servo-time 300
 ```
 
 ## Expected Behavior
@@ -59,8 +68,9 @@ After running, check `outputs/YYYYMMDD_HHMMSS/`:
 ```
 Error: Model file not found
 ```
-**Solution:** Check that autobot10 model exists at:
-`c:/junkyard/ai/autobots/autobot10/models/v10/board_view_v10_final_20251225_164911.zip`
+**Solution:** Provide valid model path via `--model` argument.
+- V10 models: `../autobot10/models/v10/`
+- V10-segmented models: `../autobot10-segmented/models/v10-segmented/`
 
 ### Robot connection failed
 ```
@@ -77,29 +87,15 @@ RuntimeError: Failed to open camera
 ```
 **Solution:**
 - Check camera is connected
-- Verify camera index (default: 0)
-- Try `python -c "from hardware import find_cameras; print(find_cameras())"`
+- Verify camera index in config.yaml (default: 0)
+- Test with OpenCV: `python -c "import cv2; print(cv2.VideoCapture(0).isOpened())"`
 
 ## Advanced Usage
 
 ### Using Configuration File
 
-Edit `config.yaml` to change defaults, then:
-
-```python
-import yaml
-from run_sim2real import Sim2RealController
-
-with open('config.yaml') as f:
-    config = yaml.safe_load(f)
-
-controller = Sim2RealController(
-    num_steps=config['num_steps'],
-    model_path=config['model_path'],
-    save_images=config['save_images']
-)
-controller.run()
-```
+Edit `config.yaml` to change hardware settings (COM port, camera index, etc.).
+Model paths are specified via command-line arguments.
 
 ### Custom Control Loop
 
@@ -110,14 +106,14 @@ sys.path.insert(0, 'c:/junkyard/ai/autobots/dofbot_lib')
 from hardware import DofbotRobot, Camera
 from autobot10_inference import V10Inference
 
-# Initialize
+# Initialize hardware and model
 robot = DofbotRobot()
 camera = Camera().open()
-inference = V10Inference()
+inference = V10Inference(model_path='path/to/model.zip')
 
-# Custom loop
-for i in range(10):
-    img = camera.read_frame()
+# Custom control loop
+for step in range(10):
+    frame = camera.read_frame()
     current_servo = robot.get_current_positions()
     current_rad = inference.convert_servo_to_radians(current_servo)
     
