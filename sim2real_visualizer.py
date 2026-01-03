@@ -36,6 +36,8 @@ class Sim2RealVisualizer:
         self.display_thread = None
         self.render_queue = queue.Queue(maxsize=1)
         self.camera_queue = queue.Queue(maxsize=1)
+        self.segmentation_queue = queue.Queue(maxsize=1)
+        self.keep_alive = False  # Keep window open after run ends
         
     def start(self):
         """Start the visualizer."""
@@ -148,20 +150,28 @@ class Sim2RealVisualizer:
         except queue.Full:
             pass
     
-    def update_camera_feed(self, camera_frame):
+    def update_camera_feed(self, camera_frame, segmentation_result=None):
         """Update camera feed visualization.
         
         Args:
             camera_frame: Camera image (numpy array)
+            segmentation_result: Optional dict with segmentation data (bbox, mask, etc.)
         """
         if not self.running or camera_frame is None:
             return
         
-        # Update queue (non-blocking)
+        # Update camera queue (non-blocking)
         try:
             self.camera_queue.put_nowait(camera_frame.copy())
         except queue.Full:
             pass
+        
+        # Update segmentation queue (non-blocking)
+        if segmentation_result is not None:
+            try:
+                self.segmentation_queue.put_nowait(segmentation_result)
+            except queue.Full:
+                pass
     
     def _display_loop(self):
         """Display loop running in separate thread."""
@@ -171,8 +181,10 @@ class Sim2RealVisualizer:
         # Initialize with blank frames
         render_frame = np.zeros((self.render_height, self.render_width, 3), dtype=np.uint8)
         camera_frame = np.zeros((self.render_height, self.render_width, 3), dtype=np.uint8)
+        segmentation_result = None
         
-        while self.running:
+        # Keep window open until user closes it
+        while True:
             # Get latest render frame
             try:
                 render_frame = self.render_queue.get_nowait()
@@ -187,18 +199,30 @@ class Sim2RealVisualizer:
             except queue.Empty:
                 pass
             
+            # Get latest segmentation result
+            try:
+                segmentation_result = self.segmentation_queue.get_nowait()
+            except queue.Empty:
+                pass
+            
             # Add labels
             render_labeled = render_frame.copy()
             camera_labeled = camera_frame.copy()
+            
+            # Draw segmentation overlay on camera feed
+            if segmentation_result is not None:
+                camera_labeled = self._draw_segmentation_overlay(camera_labeled, segmentation_result)
             
             cv2.putText(
                 render_labeled, "PyBullet Arm Pose", (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
             )
             
+            status_text = "Physical Camera Feed (LIVE)" if self.running else "Physical Camera Feed (ENDED - Press ESC to close)"
+            color = (0, 255, 0) if self.running else (0, 255, 255)
             cv2.putText(
-                camera_labeled, "Physical Camera Feed", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
+                camera_labeled, status_text, (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2
             )
             
             # Combine frames side-by-side
@@ -210,17 +234,61 @@ class Sim2RealVisualizer:
             # Check for window close or ESC key
             key = cv2.waitKey(1) & 0xFF
             if key == 27 or cv2.getWindowProperty(self.window_name, cv2.WND_PROP_VISIBLE) < 1:
-                self.running = False
                 break
         
         cv2.destroyWindow(self.window_name)
     
-    def stop(self):
-        """Stop the visualizer."""
-        self.running = False
+    def _draw_segmentation_overlay(self, frame, seg_result):
+        """Draw segmentation overlay on camera frame.
         
+        Args:
+            frame: Camera frame to draw on
+            seg_result: Segmentation result dict with bbox, mask, coverage, etc.
+        
+        Returns:
+            Frame with overlay drawn
+        """
+        overlay = frame.copy()
+        
+        # Draw bounding box if available
+        if 'bbox' in seg_result and seg_result.get('chessboard_present', False):
+            x1, y1, x2, y2 = seg_result['bbox']
+            # Draw semi-transparent green box
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            
+            # Draw coverage and confidence text
+            coverage = seg_result.get('coverage', 0.0)
+            confidence = seg_result.get('confidence', 0.0)
+            
+            text = f"Coverage: {coverage:.1f}% | Conf: {confidence:.2f}"
+            cv2.putText(overlay, text, (x1, y1 - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        # Draw mask overlay if available
+        if 'mask' in seg_result and seg_result['mask'] is not None:
+            mask = seg_result['mask']
+            if mask.shape[:2] != frame.shape[:2]:
+                mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]))
+            
+            # Create colored mask overlay (semi-transparent green)
+            mask_overlay = np.zeros_like(overlay)
+            mask_overlay[:, :, 1] = 255  # Green channel
+            mask_overlay = cv2.bitwise_and(mask_overlay, mask_overlay, mask=mask.astype(np.uint8))
+            
+            # Blend with original frame
+            overlay = cv2.addWeighted(overlay, 0.7, mask_overlay, 0.3, 0)
+        
+        return overlay
+    
+    def stop(self):
+        """Stop the visualizer (but keep window open until user closes it)."""
+        self.running = False
+        # Note: Display thread will continue running until user closes window
+        
+    def wait_for_close(self):
+        """Wait for user to close the window."""
         if self.display_thread is not None:
-            self.display_thread.join(timeout=2.0)
+            self.display_thread.join()
         
         if self.physics_client is not None:
             p.disconnect()

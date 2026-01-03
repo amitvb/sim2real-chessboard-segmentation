@@ -93,14 +93,25 @@ class Sim2RealController:
         # Move to default starting pose if requested
         if self.use_default_start:
             print(f"   Moving to {self.pose_type} default starting pose...")
+            
+            # First, explicitly move to home position to ensure clean state
+            print(f"   Step 1: Moving to home position [90, 90, 90, 90, 90, 90]...")
+            self.robot.home()
+            time.sleep(1.5)
+            
+            # Now move to actual starting pose
             starting_pose = self.inference.get_default_starting_pose(
                 as_servo=True, 
                 use_autobot8=(self.pose_type == 'autobot8'),
                 use_sim2real=(self.pose_type == 'sim2real')
             )
-            self.robot.set_all_servos(starting_pose.tolist(), time_ms=1500)
-            time.sleep(1.8)  # Wait for movement + settling
-            print(f"   Starting pose: {np.round(starting_pose, 1)}")
+            print(f"   Step 2: Moving to target pose {np.round(starting_pose, 1)}")
+            
+            # Send command with longer movement time to ensure completion
+            self.robot.set_all_servos(starting_pose.tolist(), time_ms=3000)
+            time.sleep(4.0)  # Wait for full movement (3s movement + 1s settling)
+            
+            print(f"   Robot initialization complete")
         
         self.robot.set_rgb(0, 255, 0)  # Green = ready
         
@@ -140,12 +151,9 @@ class Sim2RealController:
                     print(f"  Failed to capture image")
                     return None
                 
-                # Update camera feed visualization
-                if self.visualizer:
-                    self.visualizer.update_camera_feed(frame)
-                
                 # Get current joint angles (servo angles 0-180°)
-                current_servo_angles = self.robot.get_current_positions()
+                # Use commanded positions instead of hardware read (hardware read is unreliable)
+                current_servo_angles = self.robot.get_current_positions(use_hardware_read=False)
                 
                 # Convert to radians for model
                 current_joint_radians = self.inference.convert_servo_to_radians(
@@ -154,6 +162,7 @@ class Sim2RealController:
                 
                 # === Step 2: Run segmentation (if using segmented model) ===
                 detection = None
+                seg_result_for_viz = None
                 if self.use_segmented_model and self.segmenter is not None:
                     # Run segmentation on captured frame
                     seg_result = self.segmenter.analyze(frame, conf_threshold=0.2)
@@ -166,14 +175,25 @@ class Sim2RealController:
                             x_min, y_min = polygon.min(axis=0)
                             x_max, y_max = polygon.max(axis=0)
                             bbox = (x_min, y_min, x_max - x_min, y_max - y_min)
+                            bbox_viz = (int(x_min), int(y_min), int(x_max), int(y_max))  # For visualization
                         else:
                             bbox = None
+                            bbox_viz = None
                         
                         detection = {
                             'bbox': bbox,
                             'confidence': seg_result['confidence'],
                             'coverage': seg_result['coverage'],
                             'edges_cut': seg_result['edges_cut'],
+                            'chessboard_present': True
+                        }
+                        
+                        # Prepare for visualization
+                        seg_result_for_viz = {
+                            'bbox': bbox_viz,
+                            'confidence': seg_result['confidence'],
+                            'coverage': seg_result['coverage'],
+                            'mask': seg_result.get('mask'),
                             'chessboard_present': True
                         }
                     else:
@@ -209,9 +229,10 @@ class Sim2RealController:
                 # Apply action to robot
                 self.robot.set_all_servos(next_servo_angles.tolist(), time_ms=self.servo_time_ms)
                 
-                # Update arm pose visualization
+                # Update visualizations
                 if self.visualizer:
                     self.visualizer.update_arm_pose(next_servo_angles.tolist())
+                    self.visualizer.update_camera_feed(frame, segmentation_result=seg_result_for_viz)
                 
                 time.sleep(self.settling_delay_s)
                 
@@ -259,6 +280,12 @@ class Sim2RealController:
             # Save trajectory
             if self.save_images:
                 self._save_trajectory(trajectory)
+            
+            # Keep visualizer window open for inspection
+            if self.visualizer:
+                print("\nVisualization window will remain open. Press ESC in the window to close.")
+                self.visualizer.stop()  # Stop updating but keep window
+                self.visualizer.wait_for_close()  # Wait for user to close
             
         except KeyboardInterrupt:
             print("\n=== Interrupted by user ===")
@@ -332,8 +359,6 @@ def main():
                         help='Servo movement time in milliseconds (default: 200)')
     parser.add_argument('--settling-delay', type=float, default=0.25,
                         help='Settling delay in seconds after servo command (default: 0.25)')
-    parser.add_argument('--no-default-start', action='store_true',
-                        help='Skip moving to default starting pose')
     parser.add_argument('--pose-type', type=str, default='sim2real', 
                         choices=['sim2real', 'autobot8', 'v10'],
                         help='Starting pose type (default: sim2real)')
@@ -350,7 +375,7 @@ def main():
         save_images=not args.no_save,
         servo_time_ms=args.servo_time,
         settling_delay_s=args.settling_delay,
-        use_default_start=not args.no_default_start,
+        use_default_start=True,  # Always start from default pose
         pose_type=args.pose_type,
         enable_visualization=args.visualize,
         use_segmented_model=args.use_segmented
